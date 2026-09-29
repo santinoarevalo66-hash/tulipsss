@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flowers for You – Roxanne Clemente</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap">
+<style>
+  :root { --bg:#f4f1ea; --fg:#2b2b2b; box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16181d; --fg:#e8e6e1; } }
+  :root[data-theme="dark"] { --bg:#16181d; --fg:#e8e6e1; }
+  html { scroll-padding-top:env(safe-area-inset-top,0px); }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--fg);
+    font-family:Georgia, "Times New Roman", serif; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:12px; padding:16px; box-sizing:border-box; }
+  #wrap { width:100%; max-width:960px; aspect-ratio:3/2; border-radius:14px; overflow:hidden;
+    box-shadow:0 6px 24px rgba(0,0,0,.25); }
+  canvas { width:100%; height:100%; display:block; }
+  p { margin:0; font-size:.9rem; opacity:.7; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<p>Tap or click the garden to replay the bloom 🌷</p>
+<script>
+const FPS_CYCLE = 14;
+// x, stem height, petal color, dark shade, start delay
+const TULIPS = [
+  [1.5,3.6,"#e63946","#a4161a",0.0],[3.0,4.4,"#ffb703","#e08e00",0.8],
+  [4.5,3.9,"#f78fb3","#c44569",1.6],[6.0,4.8,"#9b5de5","#6a2fb0",0.4],
+  [7.5,3.7,"#ff6b35","#c9411a",1.2],[9.0,4.3,"#e63946","#a4161a",2.0],
+  [10.5,3.5,"#f15bb5","#b5179e",0.6]
+];
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let W, H, offset = 0;
+
+function resize() {
+  const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  W = cv.width = Math.round(r.width * d); H = cv.height = Math.round(r.height * d);
+}
+window.addEventListener("resize", resize); resize();
+cv.addEventListener("click", () => { offset = performance.now(); });
+
+const ease = x => { x = Math.min(1, Math.max(0, x)); return x*x*(3-2*x); };
+const rot = (x, y, a) => [x*Math.cos(a) - y*Math.sin(a), x*Math.sin(a) + y*Math.cos(a)];
+
+function poly(pts, fc, ec, lw) {
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+  ctx.closePath(); ctx.fillStyle = fc; ctx.fill();
+  if (ec) { ctx.strokeStyle = ec; ctx.lineWidth = lw; ctx.stroke(); }
+}
+function circle(x, y, r, c, a = 1) {
+  ctx.globalAlpha = a; ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+}
+
+function petal(base, ang, len, wid) {
+  const L = [], R = [];
+  for (let i = 0; i < 24; i++) {
+    const t = i / 23, hw = wid * Math.sin(Math.PI * Math.pow(t, 0.8)) * (1 - 0.25 * t);
+    L.push(rot(-hw, t * len, ang)); R.push(rot(hw, t * len, ang));
+  }
+  return L.concat(R.reverse()).map(p => [base[0] + p[0], base[1] + p[1]]);
+}
+
+function leaf(x0, h, side, sway, grow) {
+  const L = [], R = [], len = h * 0.65 * grow;
+  for (let i = 0; i < 25; i++) {
+    const s = i / 24;
+    const cx = x0 + side * (len * 0.55 * s + 0.25 * Math.sin(s * Math.PI) * grow) + sway * s * s * 0.5;
+    const cy = len * (s - 0.25 * s * s) + 0.05;
+    const w = 0.16 * Math.pow(Math.sin(Math.PI * s), 0.9) * grow;
+    L.push([cx - w, cy]); R.push([cx + w, cy]);
+  }
+  return L.concat(R.reverse());
+}
+
+function model(T, t) {
+  const [x0, hMax, col, dark, delay] = T, lt = t - delay;
+  const grow = ease(lt / 5), bloom = ease((lt - 3) / 3.5);
+  if (grow <= 0) return null;
+  const h = hMax * grow, amp = 0.22 * (0.4 + 0.6 * grow);
+  const sway = amp * Math.sin(2 * t + x0 * 0.9) + 0.06 * Math.sin(5.1 * t + x0);
+  const stem = [];
+  for (let i = 0; i < 40; i++) { const y = h * i / 39; stem.push([x0 + sway * (y / hMax) ** 2, y]); }
+  return { x0, h, col, dark, grow, bloom, sway, stem };
+}
+
+function drawScene(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#3a7cb8"); g.addColorStop(1, "#dbe9f6");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(W / 12, 0, 0, -H / 8, 0, H); // world coords: 12 x 8, y up
+  circle(10.6, 7.0, 0.6, "#ffe066");
+  [[2,6.8],[6,7.3],[9,6.4]].forEach(([cx, cy], i) => {
+    const px = (cx + 0.4 * t + i * 3) % 14 - 1;
+    [[0,0,.45],[.5,.1,.55],[1,0,.4]].forEach(([dx, dy, r]) => circle(px + dx, cy + dy, r, "#fff", 0.85));
+  });
+  ctx.fillStyle = "#5a3e2b"; ctx.fillRect(0, 0, 12, 0.6);
+  ctx.fillStyle = "#52b788"; ctx.fillRect(0, 0.6, 12, 0.12);
+
+  const ms = TULIPS.map(T => model(T, t)).filter(Boolean);
+  ms.forEach(m => [-1, 1].forEach(s => poly(leaf(m.x0, m.h, s, m.sway, m.grow), "#40916c", "#2d6a4f", 0.02)));
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ms.forEach(m => {
+    ctx.beginPath(); m.stem.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.strokeStyle = "#2d6a4f"; ctx.lineWidth = 0.07; ctx.stroke();
+  });
+  ms.forEach(m => {
+    if (m.bloom <= 0 && m.grow < 0.6) return;
+    const a = m.stem[39], b = m.stem[35];
+    const top = a, tilt = -Math.atan2(a[0] - b[0], a[1] - b[1]) + 0.03 * Math.sin(2 * t + m.x0);
+    const size = 0.35 + 0.65 * m.grow, len = 1.25 * size, wid = 0.42 * size;
+    const sp = 0.10 + 0.55 * m.bloom + 0.04 * Math.sin(1.5 * t + m.x0);
+    [[tilt - sp * 1.5, .95, m.dark], [tilt + sp * 1.5, .95, m.dark],
+     [tilt - sp * .7, 1, m.col], [tilt + sp * .7, 1, m.col], [tilt, 1.05, m.col]]
+      .forEach(([ang, sc, c]) => poly(petal(top, ang, len * sc, wid), c, m.dark, 0.025));
+    const [hx, hy] = rot(0, len * 0.2, tilt), [hx2, hy2] = rot(0, len * 0.75, tilt);
+    ctx.beginPath(); ctx.moveTo(top[0] + hx, top[1] + hy); ctx.lineTo(top[0] + hx2, top[1] + hy2);
+    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 0.04; ctx.stroke();
+  });
+}
+
+const SCRIPT = '"Great Vibes", "Snell Roundhand", "Brush Script MT", cursive';
+if (document.fonts) document.fonts.load('40px "Great Vibes"').catch(() => {});
+
+function drawText(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = ease((t - 0.4) / 2);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#8a1c3a";
+  ctx.shadowColor = "rgba(255,255,255,.9)"; ctx.shadowBlur = W * 0.012;
+  ctx.font = `${W * 0.085}px ${SCRIPT}`;
+  ctx.fillText("Flowers for you", W / 2, H * 0.11);
+  ctx.font = `${W * 0.05}px ${SCRIPT}`;
+  ctx.fillText("Roxanne Clemente", W / 2, H * 0.205);
+  ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+}
+
+function frame(now) {
+  const t = ((now - offset) / 1000) % FPS_CYCLE;
+  drawScene(t);
+  drawText(t);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
